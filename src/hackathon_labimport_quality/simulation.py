@@ -23,7 +23,32 @@ def valid_normal_data(
 
 
 # categorical data
+def valid_categorical_data(
+    number: int,
+    categories: Sequence[str] = ("A", "B", "C"),
+    weights: Sequence[float] | None = None,
+    seed: int | None = None,
+) -> list[str]:
+    """Simulate `number` valid nominal values drawn from `categories`.
 
+    Categories have no inherent order. `weights` gives the relative
+    probability of each category (default: uniform).
+    Pass `seed` for reproducible output.
+    """
+    if number < 0:
+        raise ValueError("number must be non-negative")
+    if not categories:
+        raise ValueError("categories must not be empty")
+    if len(set(categories)) != len(categories):
+        raise ValueError("categories must be unique")
+    if weights is not None and len(weights) != len(categories):
+        raise ValueError("weights must have the same length as categories")
+
+    rng = random.Random(seed)
+    return rng.choices(list(categories), weights=weights, k=number)
+
+
+# ordinal data
 def valid_ordinal_data(
     number: int,
     levels: Sequence[str] = ("negative", "trace", "+", "++", "+++"),
