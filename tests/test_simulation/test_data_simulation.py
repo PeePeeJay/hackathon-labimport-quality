@@ -3,9 +3,31 @@ import numpy as np
 import pytest
 
 from hackathon_labimport_quality.simulation import (
+    valid_categorical_data,
     valid_normal_data,
     valid_ordinal_data,
 )
+
+
+def test_valid_categorical_data_frequencies_match_weights():
+    number = 10_000
+    categories = ["cat", "dog", "bird"]
+    weights = [0.2, 0.3, 0.5]
+
+    sample = valid_categorical_data(number, categories, weights, seed=1337)
+
+    assert len(sample) == number
+    assert set(sample) <= set(categories)
+
+    values, counts = np.unique(sample, return_counts=True)
+    observed = dict(zip(values, counts / number))
+    frequencies = np.array([observed.get(c, 0.0) for c in categories])
+    assert np.allclose(frequencies, weights, atol=0.02)
+
+
+def test_valid_categorical_data_rejects_duplicate_categories():
+    with pytest.raises(ValueError):
+        valid_categorical_data(10, categories=["a", "a"])
 
 
 def test_valid_ordinal_data():
