@@ -1,6 +1,11 @@
 import numpy as np
 
-from hackathon_labimport_quality.simulation import valid_ordinal_data
+import pytest
+
+from hackathon_labimport_quality.simulation import (
+    valid_normal_data,
+    valid_ordinal_data,
+)
 
 
 def test_valid_ordinal_data():
@@ -32,3 +37,27 @@ def test_valid_ordinal_data_frequencies_match_weights():
 
     # Std of a proportion is <= sqrt(0.25 / n) = 0.005 here; 0.02 is ~4 sigma.
     assert np.allclose(frequencies, weights, atol=0.02)
+
+
+def test_valid_normal_data_moments_match_parameters():
+    number = 10_000
+    mean, std = 5.0, 2.0
+
+    sample = valid_normal_data(number, mean, std, seed=1337)
+
+    assert len(sample) == number
+    # Standard error of the mean is std / sqrt(n) = 0.02; atol is ~5 sigma.
+    assert np.isclose(sample.mean(), mean, atol=0.1)
+    assert np.isclose(sample.std(), std, atol=0.1)
+
+
+def test_valid_normal_data_is_reproducible_with_seed():
+    first = valid_normal_data(100, seed=42)
+    second = valid_normal_data(100, seed=42)
+
+    assert np.array_equal(first, second)
+
+
+def test_valid_normal_data_rejects_negative_std():
+    with pytest.raises(ValueError):
+        valid_normal_data(10, std=-1.0)

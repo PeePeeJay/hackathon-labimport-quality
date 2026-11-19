@@ -1,14 +1,28 @@
-# normal data
-
-
-# categorical data
-
-# ordinal data
-
-
 import random
 from collections.abc import Sequence
 
+import numpy as np
+
+def valid_normal_data(
+    number: int,
+    mean: float = 0.0,
+    std: float = 1.0,
+    seed: int | None = None,
+) -> np.ndarray:
+    """Simulate `number` values from a normal distribution N(mean, std**2).
+
+    Pass `seed` for reproducible output.
+    """
+    if number < 0:
+        raise ValueError("number must be non-negative")
+    if std < 0:
+        raise ValueError("std must be non-negative")
+
+    rng = np.random.default_rng(seed)
+    return rng.normal(loc=mean, scale=std, size=number)
+
+
+# categorical data
 
 def valid_ordinal_data(
     number: int,
@@ -30,3 +44,4 @@ def valid_ordinal_data(
 
     rng = random.Random(seed)
     return rng.choices(list(levels), weights=weights, k=number)
+
