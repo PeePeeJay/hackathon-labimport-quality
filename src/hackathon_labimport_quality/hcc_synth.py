@@ -1,6 +1,9 @@
 """Synthetischer HCC-eCRF-Datensatz mit injizierten Fehlern (PoC OOD-Monitoring).
 
-Zwei Schritte:
+Ein Aufruf, ein Seed:
+    clean, data, truth = make_dataset(n=1000, seed=42)
+
+Dahinter zwei Schritte:
   1. generate_clean()  -> plausible Kohorte, korreliert ueber latente Variablen
   2. inject_errors()   -> bekannte Anzahl Fehler je Typ + Ground Truth
 
@@ -23,13 +26,15 @@ LABS = LABS_NORMAL + LABS_HEAVY
 
 # Fehler je Typ (Default). Jeder Fehler trifft eine eigene Zeile.
 DEFAULT_ERRORS = {
-    "einheitenfehler": 10,      # Bilirubin in umol/l statt mg/dl (x17.1)
-    "kommaverschiebung": 10,    # Laborwert x10 oder /10
-    "feldtausch": 10,           # Albumin <-> INR vertauscht
-    "unmoegliche_kombination": 10,  # Child-Pugh A trotz schwerer Dekompensation
-    "platzhalterwert": 10,      # 999 / 0 / -1 als Laborwert
-    "duplikat": 10,             # Zeile mit neuer Patienten-ID kopiert
+    "einheitenfehler": 25,      # Bilirubin in umol/l statt mg/dl (x17.1)
+    "kommaverschiebung": 25,    # Laborwert um 1 oder 2 Stellen verschoben
+    "feldtausch": 25,           # Albumin <-> INR vertauscht
+    "unmoegliche_kombination": 25,  # Child-Pugh A trotz schwerer Dekompensation
+    "platzhalterwert": 25,      # 999 / 0 / -1 als Laborwert
+    "duplikat": 25,             # Zeile mit neuer Patienten-ID kopiert
 }
+# Kommaverschiebung: 1 Stelle (subtil) oder 2 Stellen (offensichtlich)
+KOMMA_FAKTOREN = [100, 10, 0.1, 0.01]
 
 
 def _pick(rng, p, labels):
@@ -100,10 +105,14 @@ def generate_clean(n: int = 1000, seed: int = 42, center: str = "Z1",
 
 
 def inject_errors(df: pd.DataFrame, errors: dict[str, int] | None = None,
-                  seed: int = 7) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Injiziert bekannte Fehler. Gibt (Daten, Ground Truth) zurueck."""
+                  seed: int = 42) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Injiziert bekannte Fehler. Gibt (Daten, Ground Truth) zurueck.
+
+    Gleicher Seed wie generate_clean(); intern ein eigener Zufallsstrom,
+    damit die Fehler nicht mit den Patientendaten korrelieren.
+    """
     errors = {**DEFAULT_ERRORS, **(errors or {})}
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng([seed, 1])
     df = df.copy()
     idx = rng.permutation(df.index)
     truth, pos = [], 0
@@ -122,7 +131,7 @@ def inject_errors(df: pd.DataFrame, errors: dict[str, int] | None = None,
             elif typ == "kommaverschiebung":
                 feld = rng.choice(LABS)
                 alt = df.at[i, feld]
-                df.at[i, feld] = round(alt * rng.choice([10, 0.1]), 2)
+                df.at[i, feld] = round(alt * rng.choice(KOMMA_FAKTOREN), 3)
                 log(i, typ, feld, alt, df.at[i, feld])
             elif typ == "feldtausch":
                 a, b = df.at[i, "albumin_g_dl"], df.at[i, "inr"]
@@ -153,6 +162,14 @@ def inject_errors(df: pd.DataFrame, errors: dict[str, int] | None = None,
     return df, pd.DataFrame(truth)
 
 
+def make_dataset(n: int = 1000, seed: int = 42, errors: dict[str, int] | None = None,
+                 center: str = "Z1", shift: float = 0.0):
+    """Ein Seed fuer alles. Gibt (sauber, mit_fehlern, ground_truth) zurueck."""
+    clean = generate_clean(n, seed, center, shift)
+    data, truth = inject_errors(clean, errors, seed)
+    return clean, data, truth
+
+
 def plot_overview(df: pd.DataFrame, truth: pd.DataFrame, path: Path) -> None:
     """Folien-Grafik: Verteilung der Laborwerte, injizierte Fehler markiert."""
     import matplotlib
@@ -171,9 +188,15 @@ def plot_overview(df: pd.DataFrame, truth: pd.DataFrame, path: Path) -> None:
         # nur Zeilen markieren, in denen genau dieses Feld manipuliert wurde
         ids = truth.loc[truth["feld"].str.contains(lab, regex=False), "patient_id"]
         bad = df["patient_id"].isin(ids)
-        ph = bad & df[lab].isin(PLATZHALTER)
-        x_ok, x_bad = df.loc[~bad, lab], df.loc[bad & ~ph, lab]
         log = lab in LABS_HEAVY and lab != "inr"
+        x_ok = df.loc[~bad, lab]
+        # Platzhalter und extreme Werte (z. B. Faktor 100) nicht zeichnen, nur zaehlen
+        if log:
+            lo, hi = x_ok.min() / 30, x_ok.max() * 30
+        else:
+            lo, hi = 2 * x_ok.min() - x_ok.max(), 2 * x_ok.max() - x_ok.min()
+        ph = bad & (df[lab].isin(PLATZHALTER) | ~df[lab].between(lo, hi))
+        x_bad = df.loc[bad & ~ph, lab]
         allx = pd.concat([x_ok, x_bad])
         bins = (np.geomspace(allx.min(), allx.max(), 45) if log
                 else np.linspace(allx.min(), allx.max(), 45))
@@ -182,7 +205,7 @@ def plot_overview(df: pd.DataFrame, truth: pd.DataFrame, path: Path) -> None:
         ax.plot(x_bad, np.full(len(x_bad), -0.05 * ymax), "|", color=ORANGE, ms=12,
                 mew=2, label="injizierter Fehler in diesem Feld", clip_on=False)
         if ph.sum():
-            ax.text(0.98, 0.95, f"+ {int(ph.sum())} Platzhalter\n(999 / 0 / −1)",
+            ax.text(0.98, 0.95, f"+ {int(ph.sum())} außerhalb\nder Achse",
                     transform=ax.transAxes, ha="right", va="top", fontsize=8.5,
                     color=MUTED)
         if log:
@@ -211,11 +234,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--out", type=Path, default=Path("../../../../ood-poc"))
+    ap.add_argument("--out", type=Path, default=Path("."))
     a = ap.parse_args()
 
-    clean = generate_clean(a.n, a.seed)
-    data, truth = inject_errors(clean, seed=a.seed + 1)
+    clean, data, truth = make_dataset(a.n, a.seed)
     a.out.mkdir(parents=True, exist_ok=True)
     clean.to_csv(a.out / "hcc_clean.csv", index=False)
     data.to_csv(a.out / "hcc_mit_fehlern.csv", index=False)

@@ -210,7 +210,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, default=Path("hcc_mit_fehlern.csv"))
     ap.add_argument("--truth", type=Path, default=None)
-    ap.add_argument("--out", type=Path, default=Path("../../../../ood-poc"))
+    ap.add_argument("--out", type=Path, default=Path("."))
     a = ap.parse_args()
 
     labs = ["albumin_g_dl", "thrombozyten_g_l", "bilirubin_mg_dl", "afp_ng_ml", "inr"]
